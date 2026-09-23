@@ -45,12 +45,12 @@
       lib = pkgs.lib;
 
       # Pinned revisions of the two forks.
-      revProton = "57d57d50db4170b2fb9eecefa2309cc2d66c10b3";
+      revProton = "7b385afd6a19519fbc48270e55fb4c6f30ea2ef7";
       revWine   = "b06a3d09d7a18cf5b45a8349afcc8f2202ab3e9d";
 
       # Fixed-output hashes (nix-prefetch-git).  These hashes are what pin the
       # *content* of the top-level trees to the revisions above.
-      hashProton = "sha256-ZVC9T3Xb42H/9va8rJpy8rUbDDCDv40iUoa35bG4nXc=";
+      hashProton = "sha256-6BXfAnt4OdBg+eT068zW/o6eum6Rr1eeIOaWLI6OMPM=";
       hashWine   = "sha256-ygvhCaS3sqZSDoYNNQO/wPCbxv6i++JdAul9gvQk+Ks=";
 
       protonUrl = "https://github.com/aviallon/proton-cachyos.git";
