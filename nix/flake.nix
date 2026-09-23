@@ -179,6 +179,10 @@
               || die "hash-pinned top-level tree differs from pinned git commit"
 
             # --- 4. submodules (network; revisions from the pinned gitlinks) --
+            # `git submodule update` clones into each submodule path, so the
+            # wine path (pre-filled from wineSrc above) must be cleared first;
+            # it is restored from wineSrc after the checkouts below.
+            rm -rf "$SRC/wine"
             git -C "$SRC" submodule update --init --recursive
 
             # wine is itself a pinned flake input: require the submodule
