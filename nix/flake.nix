@@ -82,11 +82,13 @@
         mtune = "znver3";           # GCC -mtune
         rustTargetCpu = "znver3";   # rustc -Ctarget-cpu
         lto = false;                # inject -flto / -Clto + USE_LTO=1
-        treeWideAvxWorkaround = false;  # false = strip CachyOS's x86_64
-                                        # -mno-avx/-mno-avx2/-mno-avx512f
-                                        # -fvect-cost-model=cheap (i386 ABI
-                                        # flags and DXVK's own -mno-avx are
-                                        # kept); true = CachyOS stock
+        treeWideAvxWorkaround = false;  # false = proton/Makefile.in already keeps
+                                        # only the i386 ABI -mno-avx* flags and
+                                        # DXVK's own -mno-avx (the x86_64
+                                        # tree-wide disable was dropped in
+                                        # Makefile.in, matching CI);
+                                        # true = re-apply CachyOS stock's
+                                        # tree-wide x86_64 workaround on top
       };
 
       sanitize = s: lib.replaceStrings [ "/" " " ] [ "-" "-" ] s;
@@ -136,7 +138,7 @@
           WORK="''${XDG_CACHE_HOME:-$HOME/.cache}/proton-cachyos-numa-hdr-v3"
           GITDIR="$WORK/git-proton"
           SRC="$GITDIR"
-          BUILD="$WORK/build-$BUILD_NAME"
+          BUILD="$WORK/build"
 
           mkdir -p "$WORK"
 
@@ -242,48 +244,37 @@
             --enable-ccache
 
           # --- 6. tree-wide x86_64 AVX workaround ----------------------------
-          # CachyOS commit d89efe07 (2026-04-17, Stelios Tsampas) appends, in
-          # the GCC branch:
-          #   i386_CFLAGS   += -mno-avx -mno-avx2 -mno-avx512f
-          #   i386_CFLAGS   += -fvect-cost-model=cheap
-          #   x86_64_CFLAGS += -mno-avx -mno-avx2 -mno-avx512f
-          #   x86_64_CFLAGS += -fvect-cost-model=cheap
-          # and the analogous single x86_64 += in the Clang branch.  The i386
-          # flags are an ABI correctness requirement (the 32-bit Windows ABI
-          # guarantees only 4-byte stack alignment; paired with
-          # -mpreferred-stack-boundary=2 / -mstack-alignment=4 and
-          # -mstackrealign), so they are ALWAYS kept exactly.  The x86_64 flags
-          # are a DXVK-specific workaround (bisected to DXVK 5a4d8921 /
-          # 64124232) that CachyOS applies tree-wide; DXVK keeps its own
-          # -mno-avx via DXVK_x86_64_CFLAGS.
+          # proton/Makefile.in is now the single source of truth: it keeps the
+          # i386 ABI flags (-mno-avx -mno-avx2 -mno-avx512f
+          # -fvect-cost-model=cheap, paired with -mpreferred-stack-boundary=2)
+          # and DXVK's own -mno-avx, and does NOT apply any x86_64 tree-wide
+          # AVX disable.  That is exactly what CI gets too, because CI runs
+          # configure.sh directly -- so flake and CI agree by construction.
           #
-          # Default (treeWideAvxWorkaround=false): strip the x86_64 AVX-disable
-          # and anti-vectorisation flags from the generated Makefile (build
-          # output), leaving i386 untouched.  This is a deliberate departure
-          # from CachyOS's "never emit AVX regardless of HOST_CFLAGS" ISA
-          # policy, visible only because -march=x86-64-v3 raises HOST_CFLAGS
-          # above CachyOS's nocona default.  It still needs an in-game test.
-          # Opt-in (treeWideAvxWorkaround=true): leave the tree exactly as
-          # CachyOS ships it.
-          if [ "$TREE_WIDE_AVX_WORKAROUND" != "1" ]; then
+          # The stock variant (treeWideAvxWorkaround=true) re-applies CachyOS
+          # commit d89efe07 (2026-04-17, Stelios Tsampas)'s x86_64 half on top
+          # of the generated Makefile, for A/B comparison only.
+          if [ "$TREE_WIDE_AVX_WORKAROUND" = "1" ]; then
             cat >> Makefile <<'TREEAVXEOF'
 
-          # proton-cachyos Nix flake: treeWideAvxWorkaround=false.
-          # Strip only the x86_64 tree flags; i386 ABI flags are untouched.
-          x86_64_CFLAGS := $(filter-out -mno-avx -mno-avx2 -mno-avx512f -fvect-cost-model=cheap,$(x86_64_CFLAGS))
+          # proton-cachyos Nix flake: treeWideAvxWorkaround=true.
+          # Re-apply CachyOS stock's tree-wide x86_64 AVX disable (the i386
+          # ABI flags and DXVK's -mno-avx already come from Makefile.in).
+          x86_64_CFLAGS += -mno-avx -mno-avx2 -mno-avx512f
+          x86_64_CFLAGS += -fvect-cost-model=cheap
           TREEAVXEOF
           fi
 
           echo ":: generated Makefile HOST_* flags:"
           grep -n 'HOST_CFLAGS\|HOST_RUSTFLAGS' Makefile || true
           if [ "$TREE_WIDE_AVX_WORKAROUND" = "1" ]; then
-            echo ":: tree-wide x86_64 AVX workaround: CACHYOS STOCK (kept)"
-            echo ":: (no filter-out appended; i386 and x86_64 left exactly as CachyOS ships)"
+            echo ":: tree-wide x86_64 AVX workaround: CACHYOS STOCK (re-applied)"
+            echo ":: (x86_64 lines appended; i386 ABI flags come from Makefile.in)"
           else
-            echo ":: tree-wide x86_64 AVX workaround: STRIPPED (tree x86_64 AVX enabled)"
+            echo ":: tree-wide x86_64 AVX workaround: OFF (Makefile.in default)"
             echo ":: i386 ABI flags kept; DXVK keeps its own -mno-avx"
-            grep -n 'filter-out' Makefile || true
           fi
+          grep -n 'mno-avx' Makefile || true
 
           if [ "$STOP_AFTER_CONFIGURE" = "1" ]; then
             echo ":: PROTON_BUILDER_STOP_AFTER_CONFIGURE=1: stopping before 'make redist'"
@@ -301,10 +292,11 @@
         '';
 
       variants = {
-        # default: tree x86_64 AVX enabled; DXVK keeps its own -mno-avx
+        # default: Makefile.in scoping -- i386 ABI + DXVK -mno-avx only,
+        # x86_64 tree-wide AVX enabled (same as CI)
         "proton-v3" = { };
-        # CachyOS stock: apply the -mno-avx/-mno-avx2/-mno-avx512f
-        # -fvect-cost-model=cheap workaround tree-wide (i386 and x86_64)
+        # CachyOS stock: re-apply the -mno-avx/-mno-avx2/-mno-avx512f
+        # -fvect-cost-model=cheap workaround tree-wide on x86_64 too
         "proton-v3-cachyos-stock" = { treeWideAvxWorkaround = true; };
       };
 

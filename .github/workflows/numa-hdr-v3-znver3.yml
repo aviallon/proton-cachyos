@@ -1,0 +1,136 @@
+name: numa-hdr-v3 znver3
+
+# Build an INSTALLABLE Proton (compatibilitytools.d tar.xz) for the
+# NUMA-fixed + CachyOS-HDR-glue + x86_64-v3/znver3 configuration and publish it
+# as a release asset.
+#
+# Reuses CachyOS's proven hosted-runner recipe verbatim (_job_build.yml:
+# free-disk-space, ccache, docker, `make redist`), which also gives us the short
+# `./build` directory that espeak-ng's 275-byte LoadSpect path buffer requires
+# (the long flag-encoding build dir was the piper/espeak-ng "Bad vowel file"
+# blocker).
+#
+# The build name carries the full description; it is never part of the build
+# path.  Artifact / release asset:
+#   proton-cachyos-numa-hdr-v3-znver3.tar.xz (+ .sha512sum)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - numa-hdr-v3
+
+# contents: write is required for the release job and for _job_upload.yml.
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-slim
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      sha_short: ${{ steps.v.outputs.sha_short }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Tag
+        id: v
+        shell: bash
+        run: |
+          sha_short=$(git rev-parse --short HEAD)
+          echo "sha_short=$sha_short" >> "$GITHUB_OUTPUT"
+          # One release per commit; re-running the same commit updates it.
+          echo "tag=numa-hdr-v3-znver3-$sha_short" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build znver3
+    needs: version
+    uses: ./.github/workflows/_job_build.yml
+    with:
+      name: proton-cachyos-numa-hdr-v3-znver3
+      # -mtune=znver3 is the deliberate difference from CachyOS's core-avx2.
+      cflags: -O3 -march=x86-64-v3 -mtune=znver3
+      rustflags: -Copt-level=3 -Ctarget-cpu=znver3
+      configure: --enable-ccache
+      continue: false
+
+  verify:
+    name: Verify artifact
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download tar.xz
+        uses: actions/download-artifact@v8
+        with:
+          name: proton-cachyos-numa-hdr-v3-znver3.tar.xz
+
+      - name: Install binutils
+        run: sudo apt-get update && sudo apt-get install -y binutils
+
+      - name: Artifact self-checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOL=proton-cachyos-numa-hdr-v3-znver3
+          mkdir -p x
+          tar xJf "$TOOL.tar.xz" -C x
+          T="x/$TOOL"
+
+          echo ":: winewayland.so presence (hard fail if absent)"
+          test -f "$T/files/lib/wine/x86_64-unix/winewayland.so"
+          ls -l "$T/files/lib/wine/x86_64-unix/winewayland.so"
+
+          echo ":: proton launcher honours PROTON_ENABLE_WAYLAND / PROTON_ENABLE_HDR"
+          grep -n 'PROTON_ENABLE_WAYLAND' "$T/proton"
+          grep -n 'PROTON_ENABLE_HDR' "$T/proton"
+
+          echo ":: binary-level codegen signature (BMI present, AVX2 now non-zero)"
+          bmi=0
+          avx2=0
+          for so in "$T"/files/lib/wine/x86_64-unix/*.so; do
+            bmi=$(( bmi + $(objdump -d "$so" 2>/dev/null | grep -oE '\b(shlx|andn|rorx|sarx)\b' | wc -l) ))
+            avx2=$(( avx2 + $(objdump -d "$so" 2>/dev/null | grep -oE '\b(vpermd|vpbroadcastd|vpgatherdd|vpsllvd|vperm2i128)\b' | wc -l) ))
+          done
+          echo "BMI1/BMI2 (shlx/andn/rorx/sarx) count = $bmi"
+          echo "AVX2-only (vpermd/vpbroadcastd/vpgatherdd/vpsllvd/vperm2i128) count = $avx2"
+          [ "$bmi" -gt 0 ]
+          [ "$avx2" -gt 0 ]
+
+  release:
+    name: Release
+    needs: [version, verify]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create release if absent
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.version.outputs.tag }}"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists; will reuse it."
+          else
+            gh release create "$tag" \
+              -R "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "numa-hdr-v3 znver3 (${{ needs.version.outputs.sha_short }})" \
+              --notes "Automated CI build of proton-cachyos numa-hdr-v3 with the Wine NUMA fix, re-added CachyOS HDR glue, and x86_64-v3/znver3 codegen (-O3 -march=x86-64-v3 -mtune=znver3, rust -Ctarget-cpu=znver3, USE_LTO=0). Installable: unpack into Steam's compatibilitytools.d/. Not game-tested."
+          fi
+
+  upload:
+    name: Upload
+    needs: [version, release]
+    uses: ./.github/workflows/_job_upload.yml
+    with:
+      version: ${{ needs.version.outputs.tag }}
+      name: proton-cachyos-numa-hdr-v3-znver3

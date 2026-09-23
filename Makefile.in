@@ -109,18 +109,34 @@ ifeq ($(shell cc --version|grep 'clang'),)
 	TOOLCHAIN_PREFIX :=
 	OBJCOPY_FLAGS  := -p
 	MINGW_TYPE := gcc
+	# CachyOS commit d89efe07 (2026-04-17, Stelios Tsampas) added, tree-wide:
+	#   i386_CFLAGS   += -mno-avx -mno-avx2 -mno-avx512f
+	#   i386_CFLAGS   += -fvect-cost-model=cheap
+	#   x86_64_CFLAGS += -mno-avx -mno-avx2 -mno-avx512f
+	#   x86_64_CFLAGS += -fvect-cost-model=cheap
+	# The i386 half is an ABI correctness requirement, not an ISA preference:
+	# the 32-bit Windows ABI guarantees only 4-byte stack alignment, so AVX
+	# (which needs 16/32-byte alignment) is unsafe there; it is paired with
+	# -mpreferred-stack-boundary=2 below (Wine commit 4b458775bb8c).  The
+	# documented x86_64 motivation is a DXVK bug (bisected to DXVK 5a4d8921 /
+	# 64124242), not an ABI need, so the x86_64 half is DROPPED here as a
+	# DELIBERATE departure from CachyOS's ISA policy of never emitting AVX on
+	# x86_64 regardless of HOST_CFLAGS.  DXVK keeps its own -mno-avx via
+	# DXVK_x86_64_CFLAGS further down.  CachyOS's default -march=nocona made
+	# the removed x86_64 flags a no-op, so this only has an effect for
+	# -march >= x86-64-v3.
 	i386_CFLAGS += -mno-avx -mno-avx2 -mno-avx512f
 	i386_CFLAGS += -fvect-cost-model=cheap
-	x86_64_CFLAGS += -mno-avx -mno-avx2 -mno-avx512f
-	x86_64_CFLAGS += -fvect-cost-model=cheap
 	i386_SANITY_FLAGS := -mpreferred-stack-boundary=2
 else
 	# CLANG-specific flags
 	TOOLCHAIN_PREFIX := llvm-
 	OBJCOPY_FLAGS  :=
 	MINGW_TYPE := clang
+	# i386 ABI requirement, exactly as in the GCC branch above; the x86_64
+	# -mno-avx that CachyOS d89efe07 added here is dropped on purpose.  See the
+	# long comment in the GCC branch for the full rationale.
 	i386_CFLAGS += -mno-avx -mno-avx2 -mno-avx512f
-	x86_64_CFLAGS += -mno-avx -mno-avx2 -mno-avx512f
 	# TODO: move this to a configure option
 	i386_SANITY_FLAGS := -mstack-alignment=4
 endif
