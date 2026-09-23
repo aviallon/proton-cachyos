@@ -147,6 +147,9 @@
           if [ "$STOP_AFTER_CONFIGURE" != "1" ]; then
             # --- 1. network checkout, used ONLY for .git metadata + gitlinks ---
             if [ ! -d "$GITDIR/.git" ]; then
+              # (a previous STOP_AFTER_CONFIGURE run may have left a plain tree
+              # here without .git metadata, so clear the target first.)
+              rm -rf "$GITDIR"
               git clone --filter=blob:none "$PROTON_URL" "$GITDIR"
             fi
             git -C "$GITDIR" fetch -q origin "$PROTON_REV"
