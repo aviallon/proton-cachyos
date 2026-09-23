@@ -80,6 +80,16 @@ jobs:
       run: |
         git submodule update --init --filter=tree:0 --recursive
         mkdir ./build
+        # protonfixes' Makefile downloads unzip_6.0-29.debian.tar.xz from
+        # deb.debian.org, which now returns 404 (Debian rotated the revision).
+        # Pre-place the exact file from snapshot.debian.org and verify its
+        # sha256 so the `unzip` target is a no-op.  This is the same workaround
+        # the Nix flake carries.
+        unzip_dir=./build/obj-protonfixes-x86_64/downloads/unzip
+        mkdir -p "$unzip_dir"
+        curl -fL https://snapshot.debian.org/file/60d291e40b4cba025591bdd84f1b00779f9c68d6 \
+          -o "$unzip_dir/unzip_6.0-29.debian.tar.xz"
+        echo "14043e5ea351c02b3bc8676e1e6d20d79b9a690b6d7520e8138ac629cc048417  $unzip_dir/unzip_6.0-29.debian.tar.xz" | sha256sum -c -
 
     - name: Configure
       working-directory: ./build
