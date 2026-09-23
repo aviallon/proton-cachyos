@@ -225,6 +225,10 @@
           # from deb.debian.org/debian/pool/main/u/unzip, which now returns 404
           # (Debian rotated the revision). Pin the exact file from
           # snapshot.debian.org and verify its sha256.
+          # KEEP IN SYNC with the identical pre-fetch in
+          # .github/workflows/_job_build.yml (CI build path): same snapshot
+          # object 60d291e40b4cba025591bdd84f1b00779f9c68d6 and same sha256
+          # 14043e5ea351c02b3bc8676e1e6d20d79b9a690b6d7520e8138ac629cc048417.
           UNZIP_DIR="$BUILD/obj-protonfixes-x86_64/downloads/unzip"
           mkdir -p "$UNZIP_DIR"
           if [ ! -f "$UNZIP_DIR/unzip_6.0-29.debian.tar.xz" ]; then
