@@ -13,7 +13,8 @@ MFLAGS += V=1 VERBOSE=1
 --verbose? := --verbose
 endif
 
-SHELL := /bin/bash
+# Host plumbing (NixOS has no /bin/bash): resolve bash for both host and container.
+SHELL := $(shell command -v bash)
 
 ##
 ## General/global config
