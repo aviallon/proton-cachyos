@@ -82,9 +82,11 @@
         mtune = "znver3";           # GCC -mtune
         rustTargetCpu = "znver3";   # rustc -Ctarget-cpu
         lto = false;                # inject -flto / -Clto + USE_LTO=1
-        enableAvx2Codegen = false;  # false = CachyOS behaviour; true = strip
-                                    # CachyOS's -mno-avx/-mno-avx2/-mno-avx512f
-                                    # -fvect-cost-model=cheap target-CFLAGS
+        treeWideAvxWorkaround = false;  # false = strip CachyOS's x86_64
+                                        # -mno-avx/-mno-avx2/-mno-avx512f
+                                        # -fvect-cost-model=cheap (i386 ABI
+                                        # flags and DXVK's own -mno-avx are
+                                        # kept); true = CachyOS stock
       };
 
       sanitize = s: lib.replaceStrings [ "/" " " ] [ "-" "-" ] s;
@@ -107,7 +109,7 @@
             + "-mtune-${sanitize c.mtune}"
             + "-rustcpu-${sanitize c.rustTargetCpu}"
             + "-lto-${if c.lto then "on" else "off"}"
-            + "-avx2-${if c.enableAvx2Codegen then "on" else "off"}";
+            + "-treeavx-${if c.treeWideAvxWorkaround then "cachyos-workaround" else "enabled"}";
         in
         pkgs.writeShellScriptBin "build-${variantName}" ''
           set -euo pipefail
@@ -126,7 +128,7 @@
           MTUNE="${sanitize c.mtune}"
           RUST_TARGET_CPU="${c.rustTargetCpu}"
           LTO="${if c.lto then "1" else "0"}"
-          ENABLE_AVX2="${if c.enableAvx2Codegen then "1" else "0"}"
+          TREE_WIDE_AVX_WORKAROUND="${if c.treeWideAvxWorkaround then "1" else "0"}"
           HOST_CFLAGS_BAKED="${hostCflags}"
           HOST_RUSTFLAGS_BAKED="${hostRustflags}"
           STOP_AFTER_CONFIGURE="''${PROTON_BUILDER_STOP_AFTER_CONFIGURE:-0}"
@@ -142,7 +144,7 @@
           echo ":: march/mtune        : $MARCH / $MTUNE"
           echo ":: rust target-cpu    : $RUST_TARGET_CPU"
           echo ":: lto                : $LTO"
-          echo ":: enableAvx2Codegen  : $ENABLE_AVX2"
+          echo ":: treeWideAvxWorkaround: $TREE_WIDE_AVX_WORKAROUND"
 
           if [ "$STOP_AFTER_CONFIGURE" != "1" ]; then
             # --- 1. network checkout, used ONLY for .git metadata + gitlinks ---
@@ -206,7 +208,7 @@
             echo "mtune=$MTUNE"
             echo "rustTargetCpu=$RUST_TARGET_CPU"
             echo "lto=$LTO"
-            echo "enableAvx2Codegen=$ENABLE_AVX2"
+            echo "treeWideAvxWorkaround=$TREE_WIDE_AVX_WORKAROUND"
             echo "protonRev=$PROTON_REV"
             echo "wineRev=$WINE_REV"
             echo "sdkImage=$SDK_IMAGE"
@@ -239,30 +241,48 @@
             --proton-sdk-image="$SDK_IMAGE" \
             --enable-ccache
 
-          # --- 6. enableAvx2Codegen: strip CachyOS's AVX-disabling flags -----
-          # CachyOS's Makefile.in appends
-          #   -mno-avx -mno-avx2 -mno-avx512f -fvect-cost-model=cheap
-          # to the GCC target CFLAGS, disabling AVX/AVX2 vector codegen even
-          # with -march=x86-64-v3.  Strip exactly those tokens from the final
-          # i386/x86_64 target CFLAGS.  We edit the *generated* Makefile (build
-          # output), never the pinned source tree.  Component-specific flags
-          # (DXVK's -mno-avx, OPENFST's -mno-bmi2, ...) are NOT touched.
-          if [ "$ENABLE_AVX2" = "1" ]; then
-            cat >> Makefile <<'AVX2EOF'
+          # --- 6. tree-wide x86_64 AVX workaround ----------------------------
+          # CachyOS commit d89efe07 (2026-04-17, Stelios Tsampas) appends, in
+          # the GCC branch:
+          #   i386_CFLAGS   += -mno-avx -mno-avx2 -mno-avx512f
+          #   i386_CFLAGS   += -fvect-cost-model=cheap
+          #   x86_64_CFLAGS += -mno-avx -mno-avx2 -mno-avx512f
+          #   x86_64_CFLAGS += -fvect-cost-model=cheap
+          # and the analogous single x86_64 += in the Clang branch.  The i386
+          # flags are an ABI correctness requirement (the 32-bit Windows ABI
+          # guarantees only 4-byte stack alignment; paired with
+          # -mpreferred-stack-boundary=2 / -mstack-alignment=4 and
+          # -mstackrealign), so they are ALWAYS kept exactly.  The x86_64 flags
+          # are a DXVK-specific workaround (bisected to DXVK 5a4d8921 /
+          # 64124232) that CachyOS applies tree-wide; DXVK keeps its own
+          # -mno-avx via DXVK_x86_64_CFLAGS.
+          #
+          # Default (treeWideAvxWorkaround=false): strip the x86_64 AVX-disable
+          # and anti-vectorisation flags from the generated Makefile (build
+          # output), leaving i386 untouched.  This is a deliberate departure
+          # from CachyOS's "never emit AVX regardless of HOST_CFLAGS" ISA
+          # policy, visible only because -march=x86-64-v3 raises HOST_CFLAGS
+          # above CachyOS's nocona default.  It still needs an in-game test.
+          # Opt-in (treeWideAvxWorkaround=true): leave the tree exactly as
+          # CachyOS ships it.
+          if [ "$TREE_WIDE_AVX_WORKAROUND" != "1" ]; then
+            cat >> Makefile <<'TREEAVXEOF'
 
-          # proton-cachyos Nix flake: enableAvx2Codegen=true.
-          i386_CFLAGS   := $(filter-out -mno-avx -mno-avx2 -mno-avx512f -fvect-cost-model=cheap,$(i386_CFLAGS))
+          # proton-cachyos Nix flake: treeWideAvxWorkaround=false.
+          # Strip only the x86_64 tree flags; i386 ABI flags are untouched.
           x86_64_CFLAGS := $(filter-out -mno-avx -mno-avx2 -mno-avx512f -fvect-cost-model=cheap,$(x86_64_CFLAGS))
-          AVX2EOF
+          TREEAVXEOF
           fi
 
           echo ":: generated Makefile HOST_* flags:"
           grep -n 'HOST_CFLAGS\|HOST_RUSTFLAGS' Makefile || true
-          if [ "$ENABLE_AVX2" = "1" ]; then
-            echo ":: AVX2 neutralisation present in generated Makefile:"
-            grep -n 'filter-out' Makefile || true
+          if [ "$TREE_WIDE_AVX_WORKAROUND" = "1" ]; then
+            echo ":: tree-wide x86_64 AVX workaround: CACHYOS STOCK (kept)"
+            echo ":: (no filter-out appended; i386 and x86_64 left exactly as CachyOS ships)"
           else
-            echo ":: AVX2 neutralisation: NONE (enableAvx2Codegen=$ENABLE_AVX2)"
+            echo ":: tree-wide x86_64 AVX workaround: STRIPPED (tree x86_64 AVX enabled)"
+            echo ":: i386 ABI flags kept; DXVK keeps its own -mno-avx"
+            grep -n 'filter-out' Makefile || true
           fi
 
           if [ "$STOP_AFTER_CONFIGURE" = "1" ]; then
@@ -281,8 +301,11 @@
         '';
 
       variants = {
+        # default: tree x86_64 AVX enabled; DXVK keeps its own -mno-avx
         "proton-v3" = { };
-        "proton-v3-avx2" = { enableAvx2Codegen = true; };
+        # CachyOS stock: apply the -mno-avx/-mno-avx2/-mno-avx512f
+        # -fvect-cost-model=cheap workaround tree-wide (i386 and x86_64)
+        "proton-v3-cachyos-stock" = { treeWideAvxWorkaround = true; };
       };
 
       mkVariant = name: overrides:
@@ -301,8 +324,8 @@
       // packages
       // {
         # Named builder variants: one command apart.
-        #   proton-v3      : march=x86-64-v3 mtune=znver3 rustcpu=znver3 lto=off avx2=off
-        #   proton-v3-avx2 : same, but enableAvx2Codegen=true
+        #   proton-v3               : tree x86_64 AVX enabled, DXVK -mno-avx kept
+        #   proton-v3-cachyos-stock : CachyOS stock tree-wide AVX workaround
         default = packages."proton-v3";
         builder = packages."proton-v3";
       };
@@ -316,9 +339,9 @@
           type = "app";
           program = "${packages."proton-v3"}/bin/build-proton-v3";
         };
-        proton-v3-avx2 = {
+        proton-v3-cachyos-stock = {
           type = "app";
-          program = "${packages."proton-v3-avx2"}/bin/build-proton-v3-avx2";
+          program = "${packages."proton-v3-cachyos-stock"}/bin/build-proton-v3-cachyos-stock";
         };
       };
 
