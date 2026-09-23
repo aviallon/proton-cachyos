@@ -164,3 +164,25 @@ Expected, for the default `proton-v3`:
 * `HOST_CFLAGS` contains `-march=x86-64-v3` and no `-march=nocona`.
 
 `proton-v3-cachyos-stock` keeps the workaround on both i386 and x86_64.
+
+### Wine-level confirmation of the same knob
+
+The `Makefile` variable is not what cc reads; wine's own generated makefile is.
+After running only wine's configure through the SDK container, the flags in the
+wine makefiles are:
+
+* `obj-wine-x86_64/Makefile` `CFLAGS`: `-mcmodel=small -march=x86-64-v3 -mtune=znver3 -mfpmath=sse` — no `-mno-avx*` (the only `-mno-avx` strings in that file are the cross `i386_CFLAGS`/`i386_CXXFLAGS`);
+* `obj-wine-i386/Makefile` `CFLAGS`: `-mstackrealign -march=x86-64-v3 -mtune=znver3 -mfpmath=sse -mno-avx -mno-avx2 -mno-avx512f -fvect-cost-model=cheap`;
+* `obj-dxvk-x86_64/build.ninja`: every one of the 271 compile rules carries `-O3 -march=x86-64-v3 -mtune=znver3 -mno-avx`.
+
+## Build status (this environment)
+
+A full `make redist` of the default `proton-v3` does **not** complete here. It
+fails while building the `piper` TTS dependency: espeak-ng's `phondata` step
+reports `Compiled phonemes: 30 errors` (`Bad vowel file: …`) and exits 1,
+taking `redist` down with `Error 2`. This is independent of the x86_64 AVX
+knob (it is a dependency/data issue, and an earlier build of this tree did
+build piper successfully), but it means **no runnable artifact has been
+produced yet** and the AVX2 codegen has **not** been validated in-game. Wine's
+configure and individual wine x86_64/i386 objects *were* built successfully in
+the SDK container, which is what the flag proof above rests on.
