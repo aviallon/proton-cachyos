@@ -50,7 +50,7 @@
 
       # Fixed-output hashes (nix-prefetch-git).  These hashes are what pin the
       # *content* of the top-level trees to the revisions above.
-      hashProton = "sha256-6BXfAnt4OdBg+eT068zW/o6eum6Rr1eeIOaWLI6OMPM=";
+      hashProton = "sha256-QBI42ueqLzDLfwRGCC3Zu1GNgpYZm9IrQgWFOk/elQ4=";
       hashWine   = "sha256-ygvhCaS3sqZSDoYNNQO/wPCbxv6i++JdAul9gvQk+Ks=";
 
       protonUrl = "https://github.com/aviallon/proton-cachyos.git";
