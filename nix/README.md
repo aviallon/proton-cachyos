@@ -128,7 +128,12 @@ Not pinned / not hermetic:
   revisions recorded in the pinned proton tree, but the bytes come from each
   submodule's upstream git server;
 * the snapshot.debian.org `unzip` tarball (the original Debian URL 404s; the
-  file is fetched by content hash and verified with sha256).
+  file is fetched by content hash and verified with sha256);
+* piper's `piper-phonemize`, which `piper/CMakeLists.txt` downloads at build
+  time from a **moving branch**
+  (`https://github.com/shaunren/piper-phonemize/archive/refs/heads/pic.zip`)
+  with no hash. This is the source of the espeak-ng data used by the TTS build
+  and it can change under the pinned tree (see the build status below).
 
 The builder does **not** re-clone the top-level trees for the build: after the
 network checkout it overwrites the top-level proton/wine trees with the
@@ -180,9 +185,21 @@ wine makefiles are:
 A full `make redist` of the default `proton-v3` does **not** complete here. It
 fails while building the `piper` TTS dependency: espeak-ng's `phondata` step
 reports `Compiled phonemes: 30 errors` (`Bad vowel file: …`) and exits 1,
-taking `redist` down with `Error 2`. This is independent of the x86_64 AVX
-knob (it is a dependency/data issue, and an earlier build of this tree did
-build piper successfully), but it means **no runnable artifact has been
-produced yet** and the AVX2 codegen has **not** been validated in-game. Wine's
-configure and individual wine x86_64/i386 objects *were* built successfully in
-the SDK container, which is what the flag proof above rests on.
+taking `redist` down with `Error 2`.
+
+This failure is **independent of the AVX knob and was proven so by A/B**: the
+`proton-v3-cachyos-stock` flag set (tree-wide `-mno-avx`, 60 occurrences in
+piper's build) fails with byte-for-byte the same 30 `Bad vowel file` errors.
+The espeak-ng `phsource` tree is also identical (1312 files) to an earlier
+build of this tree that succeeded, and the flags themselves are not the cause.
+The likely cause is the unpinned moving `piper-phonemize` branch noted above.
+
+Consequences, stated plainly:
+
+* **no runnable artifact has been produced yet** and the AVX2 codegen has
+  **not** been validated in-game or disassembled;
+* wine's configure and individual wine x86_64/i386 objects *were* built
+  successfully in the SDK container, which is what the flag proof above rests
+  on;
+* a full build needs the `piper-phonemize`/espeak-ng issue resolved first
+  (e.g. pinning that dependency, or configuring with `--without-tts`).
