@@ -80,6 +80,9 @@ jobs:
         shell: bash
         run: |
           set -eu
+          # GitHub injects `-o pipefail`; a grep with no match in the opcode
+          # counting pipelines exits 1 and would abort the step, so turn it off.
+          set +o pipefail
           TOOL=proton-cachyos-numa-hdr-v3-znver3
           mkdir -p x
           tar xJf "$TOOL.tar.xz" -C x
@@ -97,7 +100,6 @@ jobs:
           bmi=0
           avx2=0
           for so in "$T"/files/lib/wine/x86_64-unix/*.so; do
-            # No pipefail here: grep returning 1 on a no-match is expected.
             bmi=$(( bmi + $(objdump -d "$so" 2>/dev/null | grep -oE '\b(shlx|andn|rorx|sarx)\b' | wc -l) ))
             avx2=$(( avx2 + $(objdump -d "$so" 2>/dev/null | grep -oE '\b(vpermd|vpbroadcastd|vpgatherdd|vpsllvd|vperm2i128)\b' | wc -l) ))
           done
