@@ -321,6 +321,17 @@ def setup_steam_dir_drive():
 def unix_to_nt_file_name(path):
     return '\\??\\unix' + path
 
+def is_driver_loaded(d):
+    try:
+        with open('/proc/modules') as f:
+            drivers = set([line.partition(' ')[0] for line in f.read().splitlines()])
+            if drivers.intersection(d):
+                return True
+            else:
+                return False
+    except OSError:
+        return False
+
 def setup_openvr_paths():
     if 'VR_PATHREG_OVERRIDE' in g_session.env:
         openvr_paths = g_session.env['VR_PATHREG_OVERRIDE']
@@ -1895,6 +1906,7 @@ class Session:
         self.check_environment("PROTON_NO_WM_DECORATION", "nowmdecoration")
         self.check_environment("PROTON_ENABLE_WAYLAND", "wayland")
         self.check_environment("PROTON_USE_WAYLAND", "wayland")
+        self.check_environment("PROTON_ENABLE_HDR", "hdr")
         self.check_environment("PROTON_PREFER_SDL", "sdlinput")
         self.check_environment("PROTON_USE_SDL", "sdlinput")
         self.check_environment("PROTON_USE_PIPEWIRE", "pipewire")
@@ -2186,6 +2198,9 @@ class Session:
                     del self.env["SteamVirtualGamepadInfo"]
                 if "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD" in self.env:
                     del self.env["SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD"]
+            if "hdr" in self.compat_config:
+                self.env["DXVK_HDR"] = "1"
+                self.env.setdefault("ENABLE_HDR_WSI", str(int(is_driver_loaded({'nvidia'}))))
         else:
             # X11 specific changes to increase compat
             # Surfaceless supports less formats than x11
